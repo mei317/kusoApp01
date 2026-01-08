@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { collection, addDoc, serverTimestamp, query, where, getDocs } from "firebase/firestore";
 import { db } from "../firebase/config";
 
@@ -27,9 +27,9 @@ const PRAISE_MESSAGES = [
 
 export const GanbattaButton = () => {
   const [count, setCount] = useState(0);
-  const [message, setMessage] = useState<{ text: string; icon: string } | null>(null);
+  const [message, setMessage] = useState<{ text: string; icon: string; key: number } | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const animationTimerRef = useRef<number | null>(null);
 
   // カウントを取得
   useEffect(() => {
@@ -47,39 +47,34 @@ export const GanbattaButton = () => {
     fetchCount();
   }, []);
 
-  const handleClick = async () => {
-    if (loading) return;
-
-    setLoading(true);
-    setIsAnimating(true);
-
-    // ランダムなメッセージを選択
-    const randomMessage = PRAISE_MESSAGES[Math.floor(Math.random() * PRAISE_MESSAGES.length)];
-    setMessage(randomMessage);
-
-    try {
-      // Firestoreに記録
-      await addDoc(collection(db, "clicks"), {
-        date: new Date().toISOString().split("T")[0],
-        timestamp: serverTimestamp(),
-      });
-
-      // カウントアップ
-      setCount((prev) => prev + 1);
-    } catch (error) {
-      console.error("Error adding click:", error);
+  const handleClick = () => {
+    // 前のアニメーションタイマーをキャンセル
+    if (animationTimerRef.current) {
+      clearTimeout(animationTimerRef.current);
     }
 
-    // アニメーション終了
-    setTimeout(() => {
-      setIsAnimating(false);
-      setLoading(false);
-    }, 2000);
+    // UIをすぐに更新（オプティミスティック更新）
+    setCount((prev) => prev + 1);
+    setIsAnimating(true);
 
-    // メッセージを消す
-    setTimeout(() => {
-      setMessage(null);
-    }, 3000);
+    // ランダムなメッセージを選択（一意のkeyで毎回アニメーションをリセット）
+    const randomMessage = PRAISE_MESSAGES[Math.floor(Math.random() * PRAISE_MESSAGES.length)];
+    setMessage({ ...randomMessage, key: Date.now() });
+
+    // Firestoreに非同期で記録（UIをブロックしない）
+    addDoc(collection(db, "clicks"), {
+      date: new Date().toISOString().split("T")[0],
+      timestamp: serverTimestamp(),
+    }).catch((error) => {
+      console.error("Error adding click:", error);
+      // エラー時はカウントを戻す
+      setCount((prev) => prev - 1);
+    });
+
+    // ボタンアニメーション終了
+    animationTimerRef.current = window.setTimeout(() => {
+      setIsAnimating(false);
+    }, 300);
   };
 
   return (
@@ -90,22 +85,24 @@ export const GanbattaButton = () => {
         <span className="material-icons app-icon">redeem</span>
       </div>
 
+      {/* 褒めメッセージ（上部に固定高さで配置） */}
+      <div className="praise-area">
+        {message && (
+          <div key={message.key} className="praise-message">
+            <span className="material-icons praise-icon">{message.icon}</span>
+            {message.text}
+          </div>
+        )}
+      </div>
+
       {/* カウント表示 */}
       <div className="count-display">今日の頑張り: {count}回</div>
 
       {/* 頑張ったボタン */}
-      <button onClick={handleClick} disabled={loading} className={`ganbatta-button ${isAnimating ? "animating" : ""}`}>
+      <button onClick={handleClick} className={`ganbatta-button ${isAnimating ? "animating" : ""}`}>
         <span className="material-icons button-icon">thumb_up</span>
         頑張った！
       </button>
-
-      {/* 褒めメッセージ */}
-      {message && (
-        <div className="praise-message">
-          <span className="material-icons praise-icon">{message.icon}</span>
-          {message.text}
-        </div>
-      )}
 
       {/* フッター：Copyright */}
       <div className="footer">© kusoAppA</div>
@@ -189,16 +186,19 @@ export const GanbattaButton = () => {
           font-size: 56px;
         }
 
+        .praise-area {
+          min-height: 80px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
         .praise-message {
           font-size: 64px;
           font-weight: 800;
           color: #fff;
           text-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-          animation: fadeInUp 0.5s ease;
-          position: absolute;
-          top: 20%;
-          left: 50%;
-          transform: translate(-50%, -50%);
+          animation: popIn 0.15s ease forwards;
           display: flex;
           align-items: center;
           gap: 16px;
@@ -216,14 +216,14 @@ export const GanbattaButton = () => {
           font-weight: 500;
         }
 
-        @keyframes fadeInUp {
+        @keyframes popIn {
           from {
             opacity: 0;
-            transform: translate(-50%, -80%);
+            transform: scale(0.8);
           }
           to {
             opacity: 1;
-            transform: translate(-50%, -50%);
+            transform: scale(1);
           }
         }
 
@@ -266,11 +266,13 @@ export const GanbattaButton = () => {
             font-size: 36px;
           }
 
+          .praise-area {
+            min-height: 50px;
+          }
+
           .praise-message {
             font-size: 36px;
             gap: 12px;
-            white-space: nowrap;
-            top: 60%;
           }
 
           .praise-icon {
@@ -314,10 +316,13 @@ export const GanbattaButton = () => {
             font-size: 32px;
           }
 
+          .praise-area {
+            min-height: 40px;
+          }
+
           .praise-message {
             font-size: 28px;
             gap: 10px;
-            top: 30%;
           }
 
           .praise-icon {
